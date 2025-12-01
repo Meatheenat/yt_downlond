@@ -1,0 +1,217 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YT Downloader Localhost (Queue)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f4f4f4;
+            margin: 0;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+        h1 { color: #333; }
+        input[type=text] {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin: 15px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        select {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0 15px 0;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+        }
+        .button-group {
+            display: flex;
+            justify-content: space-between;
+            gap: 4%;
+        }
+        .button-group button {
+            background-color: #ff0000;
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 48%;
+            font-size: 16px;
+            margin: 5px 0;
+        }
+        .button-group button:hover {
+            background-color: #e60000;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+            display: none;
+            white-space: pre-line; /* ให้ขึ้นบรรทัดใหม่ได้จาก \n */
+        }
+        .loading {
+            background-color: #e0f7fa;
+            color: #00796b;
+        }
+        .error {
+            background-color: #ffcdd2;
+            color: #d32f2f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ดาวน์โหลด YouTube (คิว)</h1>
+        <input type="text" id="videoUrl" placeholder="วาง URL YouTube ที่นี่...">
+
+        <!-- เลือกความคมชัด -->
+        <select id="quality">
+            <option value="best">Best (อัตโนมัติ)</option>
+            <option value="2160p">4K (2160p)</option>
+            <option value="1440p">2K (1440p)</option>
+            <option value="1080p">1080p (Full HD)</option>
+            <option value="720p" selected>720p (HD)</option>
+            <option value="480p">480p (SD)</option>
+            <option value="360p">360p (ต่ำ)</option>
+        </select>
+
+        <div class="button-group">
+            <button onclick="startDownload('mp4')">ดาวน์โหลด MP4 (วิดีโอ)</button>
+            <button onclick="startDownload('mp3')">ดาวน์โหลด MP3 (เสียง)</button>
+        </div>
+        <div id="status"></div>
+    </div>
+
+    <script>
+        let currentInterval = null;
+
+        function startDownload(format) {
+            const urlInput = document.getElementById('videoUrl');
+            const qualitySelect = document.getElementById('quality');
+            const statusDiv = document.getElementById('status');
+
+            const videoUrl = urlInput.value.trim();
+            const quality = qualitySelect.value;
+
+            if (!videoUrl) {
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'error';
+                statusDiv.innerText = 'กรุณาใส่ URL วิดีโอ YouTube';
+                return;
+            }
+
+            // ถ้ามีการเช็คสถานะงานเก่าอยู่ ให้หยุดก่อน
+            if (currentInterval) {
+                clearInterval(currentInterval);
+                currentInterval = null;
+            }
+
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'loading';
+            statusDiv.innerText = 'กำลังส่งงานเข้าคิว...';
+
+            // ส่งงานเข้าคิวไปที่ /enqueue
+            fetch('/enqueue', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    url: videoUrl,
+                    format: format,
+                    quality: quality
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = `เกิดข้อผิดพลาด: ${data.error}`;
+                    return;
+                }
+
+                const jobId = data.job_id;
+                const position = data.position || 1;
+
+                statusDiv.className = 'loading';
+                statusDiv.innerText = `เข้าคิวเรียบร้อย ลำดับที่ ${position} ...`;
+
+                // เริ่มเช็คสถานะงานทุก ๆ 3 วินาที
+                currentInterval = setInterval(() => {
+                    checkStatus(jobId);
+                }, 3000);
+            })
+            .catch(err => {
+                console.error(err);
+                statusDiv.className = 'error';
+                statusDiv.innerText = `เกิดข้อผิดพลาดตอนส่งเข้าคิว: ${err}`;
+            });
+        }
+
+        function checkStatus(jobId) {
+            const statusDiv = document.getElementById('status');
+
+            fetch(`/status/${jobId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        statusDiv.className = 'error';
+                        statusDiv.innerText = `เกิดข้อผิดพลาด: ${data.error}`;
+                        if (currentInterval) clearInterval(currentInterval);
+                        return;
+                    }
+
+                    const status = data.status;
+                    const progress = data.progress || '';
+                    const position = data.position || 0;
+
+                    if (status === 'queued') {
+                        statusDiv.className = 'loading';
+                        statusDiv.innerText = `รอคิว... ลำดับที่ ${position}`;
+                    } else if (status === 'downloading') {
+                        statusDiv.className = 'loading';
+                        statusDiv.innerText =
+                            `กำลังดาวน์โหลด... (คิว: ${position})\n` +
+                            (progress || '');
+                    } else if (status === 'done') {
+                        statusDiv.className = 'loading';
+                        statusDiv.innerText = 'ดาวน์โหลดเสร็จแล้ว กำลังเริ่มดาวน์โหลดไฟล์...';
+                        if (currentInterval) clearInterval(currentInterval);
+                        // ให้เบราว์เซอร์ดาวน์โหลดไฟล์จริงจาก /download/<job_id>
+                        window.location.href = `/download/${jobId}`;
+                    } else if (status === 'error') {
+                        statusDiv.className = 'error';
+                        statusDiv.innerText = progress || 'เกิดข้อผิดพลาดในการดาวน์โหลด';
+                        if (currentInterval) clearInterval(currentInterval);
+                    } else {
+                        statusDiv.className = 'error';
+                        statusDiv.innerText = 'สถานะไม่ทราบแน่ชัด';
+                        if (currentInterval) clearInterval(currentInterval);
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = `เกิดข้อผิดพลาดตอนเช็คสถานะ: ${err}`;
+                    if (currentInterval) clearInterval(currentInterval);
+                });
+        }
+    </script>
+</body>
+</html>
