@@ -259,11 +259,6 @@
         let currentJobId = null;
         let queueInterval = null;
 
-        function setButtonsDisabled(disabled) {
-            document.getElementById('btnMp4').disabled = disabled;
-            document.getElementById('btnMp3').disabled = disabled;
-        }
-
         function escapeHtml(str) {
             if (!str) return '';
             return str
@@ -292,14 +287,13 @@
                 return;
             }
 
-            // ถ้ามีการเช็คสถานะงานเก่าอยู่ ให้หยุดก่อน
+            // หยุดเช็คงานเก่า (เราจะโฟกัสงานล่าสุดบนฝั่งซ้าย)
             if (currentInterval) {
                 clearInterval(currentInterval);
                 currentInterval = null;
             }
 
             currentJobId = null;
-            setButtonsDisabled(true);
 
             statusDiv.style.display = 'block';
             statusDiv.className = 'loading';
@@ -331,7 +325,6 @@
                 if (data.error) {
                     statusDiv.className = 'error';
                     statusDiv.innerText = `เกิดข้อผิดพลาด: ${data.error}`;
-                    setButtonsDisabled(false);
                     return;
                 }
 
@@ -351,7 +344,7 @@
                 // อัปเดตคิวด้านขวาทันที
                 refreshQueue();
 
-                // เริ่มเช็คสถานะงานทุก ๆ 3 วินาที
+                // เริ่มเช็คสถานะงานล่าสุดทุก ๆ 3 วินาที
                 currentInterval = setInterval(() => {
                     checkStatus(jobId);
                 }, 3000);
@@ -360,7 +353,6 @@
                 console.error(err);
                 statusDiv.className = 'error';
                 statusDiv.innerText = `เกิดข้อผิดพลาดตอนส่งเข้าคิว: ${err}`;
-                setButtonsDisabled(false);
             });
         }
 
@@ -378,7 +370,6 @@
                         statusDiv.innerText = `เกิดข้อผิดพลาด: ${data.error}`;
                         if (currentInterval) clearInterval(currentInterval);
                         currentInterval = null;
-                        setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
                         refreshQueue();
@@ -422,7 +413,6 @@
                         if (currentInterval) clearInterval(currentInterval);
                         currentInterval = null;
 
-                        setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
 
@@ -438,7 +428,6 @@
                         statusDiv.innerText = progress || 'เกิดข้อผิดพลาดในการดาวน์โหลด';
                         if (currentInterval) clearInterval(currentInterval);
                         currentInterval = null;
-                        setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
                         refreshQueue();
@@ -447,7 +436,6 @@
                         statusDiv.innerText = progress || 'งานนี้ถูกยกเลิกแล้ว';
                         if (currentInterval) clearInterval(currentInterval);
                         currentInterval = null;
-                        setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
                         refreshQueue();
@@ -456,7 +444,6 @@
                         statusDiv.innerText = 'สถานะไม่ทราบแน่ชัด';
                         if (currentInterval) clearInterval(currentInterval);
                         currentInterval = null;
-                        setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
                         refreshQueue();
@@ -472,7 +459,6 @@
                     statusDiv.innerText = `เกิดข้อผิดพลาดตอนเช็คสถานะ: ${err}`;
                     if (currentInterval) clearInterval(currentInterval);
                     currentInterval = null;
-                    setButtonsDisabled(false);
                     queuePositionDiv.style.visibility = 'hidden';
                     cancelBtn.style.display = 'none';
                     refreshQueue();
@@ -513,7 +499,6 @@
 
                 if (currentInterval) clearInterval(currentInterval);
                 currentInterval = null;
-                setButtonsDisabled(false);
                 queuePositionDiv.style.visibility = 'hidden';
                 cancelBtn.style.display = 'none';
                 currentJobId = null;
@@ -537,7 +522,8 @@
 
             let html = '';
             items.forEach(item => {
-                const isCurrent = (item.job_id === currentJobId);
+                // ไฮไลต์ตัวที่กำลังดาวน์โหลดจริง ๆ
+                const isCurrent = (item.status === 'downloading');
                 const statusText = item.status === 'downloading'
                     ? 'กำลังดาวน์โหลด'
                     : 'รอคิว';
