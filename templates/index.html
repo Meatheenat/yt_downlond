@@ -21,14 +21,14 @@
             border-radius: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             width: 100%;
-            max-width: 500px;
+            max-width: 550px;
             text-align: center;
         }
-        h1 { color: #333; }
+        h1 { color: #333; margin-bottom: 10px; }
         input[type=text] {
             width: calc(100% - 22px);
             padding: 10px;
-            margin: 15px 0;
+            margin: 15px 0 10px 0;
             border: 1px solid #ccc;
             border-radius: 5px;
         }
@@ -58,12 +58,46 @@
         .button-group button:hover {
             background-color: #e60000;
         }
+        #jobInfo {
+            margin-top: 10px;
+            font-size: 14px;
+            text-align: left;
+            color: #555;
+            display: none;
+        }
+        .queue-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+        #queuePosition {
+            font-weight: bold;
+            color: #333;
+            visibility: hidden;
+            font-size: 14px;
+        }
+        #cancelBtn {
+            display: none;
+            background-color: #cccccc;
+            color: #333;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        #cancelBtn:hover {
+            background-color: #aaaaaa;
+        }
         #status {
-            margin-top: 20px;
+            margin-top: 15px;
             padding: 10px;
             border-radius: 5px;
             display: none;
             white-space: pre-line; /* ให้ขึ้นบรรทัดใหม่ได้จาก \n */
+            font-size: 14px;
+            text-align: left;
         }
         .loading {
             background-color: #e0f7fa;
@@ -72,6 +106,10 @@
         .error {
             background-color: #ffcdd2;
             color: #d32f2f;
+        }
+        .cancelled {
+            background-color: #eeeeee;
+            color: #555555;
         }
     </style>
 </head>
@@ -92,19 +130,38 @@
         </select>
 
         <div class="button-group">
-            <button onclick="startDownload('mp4')">ดาวน์โหลด MP4 (วิดีโอ)</button>
-            <button onclick="startDownload('mp3')">ดาวน์โหลด MP3 (เสียง)</button>
+            <button id="btnMp4" onclick="startDownload('mp4')">ดาวน์โหลด MP4 (วิดีโอ)</button>
+            <button id="btnMp3" onclick="startDownload('mp3')">ดาวน์โหลด MP3 (เสียง)</button>
         </div>
+
+        <!-- แสดงข้อมูลว่างานนี้กำลังโหลดอะไรแบบไหนอยู่ -->
+        <div id="jobInfo"></div>
+
+        <!-- แถวแสดงลำดับคิว + ปุ่ม X ยกเลิก -->
+        <div class="queue-row">
+            <div id="queuePosition">ลำดับคิว: -</div>
+            <button id="cancelBtn" onclick="cancelCurrent()">✕ ยกเลิกดาวน์โหลด</button>
+        </div>
+
         <div id="status"></div>
     </div>
 
     <script>
         let currentInterval = null;
+        let currentJobId = null;
+
+        function setButtonsDisabled(disabled) {
+            document.getElementById('btnMp4').disabled = disabled;
+            document.getElementById('btnMp3').disabled = disabled;
+        }
 
         function startDownload(format) {
             const urlInput = document.getElementById('videoUrl');
             const qualitySelect = document.getElementById('quality');
             const statusDiv = document.getElementById('status');
+            const jobInfoDiv = document.getElementById('jobInfo');
+            const queuePositionDiv = document.getElementById('queuePosition');
+            const cancelBtn = document.getElementById('cancelBtn');
 
             const videoUrl = urlInput.value.trim();
             const quality = qualitySelect.value;
@@ -122,9 +179,21 @@
                 currentInterval = null;
             }
 
+            currentJobId = null;
+            setButtonsDisabled(true);
+
             statusDiv.style.display = 'block';
             statusDiv.className = 'loading';
             statusDiv.innerText = 'กำลังส่งงานเข้าคิว...';
+
+            jobInfoDiv.style.display = 'block';
+            jobInfoDiv.innerText = `กำลังส่งงาน: ${format.toUpperCase()} | คุณภาพ: ${quality} \nURL: ${videoUrl}`;
+
+            queuePositionDiv.style.visibility = 'hidden';
+            queuePositionDiv.textContent = 'ลำดับคิว: -';
+
+            cancelBtn.style.display = 'none';
+            cancelBtn.disabled = false;
 
             // ส่งงานเข้าคิวไปที่ /enqueue
             fetch('/enqueue', {
@@ -143,14 +212,22 @@
                 if (data.error) {
                     statusDiv.className = 'error';
                     statusDiv.innerText = `เกิดข้อผิดพลาด: ${data.error}`;
+                    setButtonsDisabled(false);
                     return;
                 }
 
                 const jobId = data.job_id;
                 const position = data.position || 1;
+                currentJobId = jobId;
 
                 statusDiv.className = 'loading';
                 statusDiv.innerText = `เข้าคิวเรียบร้อย ลำดับที่ ${position} ...`;
+
+                queuePositionDiv.style.visibility = 'visible';
+                queuePositionDiv.textContent = `ลำดับคิว: ${position}`;
+
+                cancelBtn.style.display = 'inline-block';
+                cancelBtn.disabled = false;
 
                 // เริ่มเช็คสถานะงานทุก ๆ 3 วินาที
                 currentInterval = setInterval(() => {
@@ -161,11 +238,15 @@
                 console.error(err);
                 statusDiv.className = 'error';
                 statusDiv.innerText = `เกิดข้อผิดพลาดตอนส่งเข้าคิว: ${err}`;
+                setButtonsDisabled(false);
             });
         }
 
         function checkStatus(jobId) {
             const statusDiv = document.getElementById('status');
+            const jobInfoDiv = document.getElementById('jobInfo');
+            const queuePositionDiv = document.getElementById('queuePosition');
+            const cancelBtn = document.getElementById('cancelBtn');
 
             fetch(`/status/${jobId}`)
                 .then(response => response.json())
@@ -174,43 +255,145 @@
                         statusDiv.className = 'error';
                         statusDiv.innerText = `เกิดข้อผิดพลาด: ${data.error}`;
                         if (currentInterval) clearInterval(currentInterval);
+                        setButtonsDisabled(false);
+                        queuePositionDiv.style.visibility = 'hidden';
+                        cancelBtn.style.display = 'none';
                         return;
                     }
 
                     const status = data.status;
                     const progress = data.progress || '';
                     const position = data.position || 0;
+                    const title = data.title;
+                    const fmt = (data.format || '').toUpperCase();
+                    const quality = data.quality || '';
+                    const url = data.url || '';
+
+                    // อัปเดตข้อมูลงานที่กำลังดาวน์โหลดอะไร / แบบไหน
+                    let infoText = '';
+                    if (title) {
+                        infoText = `กำลังประมวลผล: ${title} (${fmt}, ${quality})\nURL: ${url}`;
+                    } else {
+                        infoText = `กำลังประมวลผล: ${fmt}, คุณภาพ ${quality}\nURL: ${url}`;
+                    }
+                    jobInfoDiv.style.display = 'block';
+                    jobInfoDiv.innerText = infoText;
 
                     if (status === 'queued') {
                         statusDiv.className = 'loading';
                         statusDiv.innerText = `รอคิว... ลำดับที่ ${position}`;
+                        queuePositionDiv.style.visibility = 'visible';
+                        queuePositionDiv.textContent = `ลำดับคิว: ${position}`;
                     } else if (status === 'downloading') {
                         statusDiv.className = 'loading';
                         statusDiv.innerText =
                             `กำลังดาวน์โหลด... (คิว: ${position})\n` +
                             (progress || '');
+                        queuePositionDiv.style.visibility = 'visible';
+                        queuePositionDiv.textContent = `ลำดับคิว: ${position}`;
                     } else if (status === 'done') {
                         statusDiv.className = 'loading';
                         statusDiv.innerText = 'ดาวน์โหลดเสร็จแล้ว กำลังเริ่มดาวน์โหลดไฟล์...';
+
                         if (currentInterval) clearInterval(currentInterval);
+                        currentInterval = null;
+
+                        setButtonsDisabled(false);
+                        queuePositionDiv.style.visibility = 'hidden';
+                        cancelBtn.style.display = 'none';
+
+                        // ล้างช่อง URL เตรียมสำหรับลิงก์ใหม่
+                        document.getElementById('videoUrl').value = '';
+
                         // ให้เบราว์เซอร์ดาวน์โหลดไฟล์จริงจาก /download/<job_id>
                         window.location.href = `/download/${jobId}`;
                     } else if (status === 'error') {
                         statusDiv.className = 'error';
                         statusDiv.innerText = progress || 'เกิดข้อผิดพลาดในการดาวน์โหลด';
                         if (currentInterval) clearInterval(currentInterval);
+                        currentInterval = null;
+                        setButtonsDisabled(false);
+                        queuePositionDiv.style.visibility = 'hidden';
+                        cancelBtn.style.display = 'none';
+                    } else if (status === 'cancelled') {
+                        statusDiv.className = 'cancelled';
+                        statusDiv.innerText = progress || 'งานนี้ถูกยกเลิกแล้ว';
+                        if (currentInterval) clearInterval(currentInterval);
+                        currentInterval = null;
+                        setButtonsDisabled(false);
+                        queuePositionDiv.style.visibility = 'hidden';
+                        cancelBtn.style.display = 'none';
                     } else {
                         statusDiv.className = 'error';
                         statusDiv.innerText = 'สถานะไม่ทราบแน่ชัด';
                         if (currentInterval) clearInterval(currentInterval);
+                        currentInterval = null;
+                        setButtonsDisabled(false);
+                        queuePositionDiv.style.visibility = 'hidden';
+                        cancelBtn.style.display = 'none';
                     }
                 })
                 .catch(err => {
                     console.error(err);
+                    const statusDiv = document.getElementById('status');
+                    const queuePositionDiv = document.getElementById('queuePosition');
+                    const cancelBtn = document.getElementById('cancelBtn');
+
                     statusDiv.className = 'error';
                     statusDiv.innerText = `เกิดข้อผิดพลาดตอนเช็คสถานะ: ${err}`;
                     if (currentInterval) clearInterval(currentInterval);
+                    currentInterval = null;
+                    setButtonsDisabled(false);
+                    queuePositionDiv.style.visibility = 'hidden';
+                    cancelBtn.style.display = 'none';
                 });
+        }
+
+        function cancelCurrent() {
+            const statusDiv = document.getElementById('status');
+            const queuePositionDiv = document.getElementById('queuePosition');
+            const cancelBtn = document.getElementById('cancelBtn');
+
+            if (!currentJobId) {
+                statusDiv.style.display = 'block';
+                statusDiv.className = 'error';
+                statusDiv.innerText = 'ไม่มีงานที่กำลังดาวน์โหลดอยู่';
+                return;
+            }
+
+            cancelBtn.disabled = true;
+            statusDiv.style.display = 'block';
+            statusDiv.className = 'cancelled';
+            statusDiv.innerText = 'กำลังยกเลิกงาน...';
+
+            fetch(`/cancel/${currentJobId}`, {
+                method: 'POST',
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = `ยกเลิกไม่สำเร็จ: ${data.error}`;
+                    cancelBtn.disabled = false;
+                    return;
+                }
+
+                statusDiv.className = 'cancelled';
+                statusDiv.innerText = 'ยกเลิกงานดาวน์โหลดแล้ว';
+
+                if (currentInterval) clearInterval(currentInterval);
+                currentInterval = null;
+                setButtonsDisabled(false);
+                queuePositionDiv.style.visibility = 'hidden';
+                cancelBtn.style.display = 'none';
+                currentJobId = null;
+            })
+            .catch(err => {
+                console.error(err);
+                statusDiv.className = 'error';
+                statusDiv.innerText = `เกิดข้อผิดพลาดตอนยกเลิกงาน: ${err}`;
+                cancelBtn.disabled = false;
+            });
         }
     </script>
 </body>

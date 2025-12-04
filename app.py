@@ -25,6 +25,9 @@ jobs_lock = threading.Lock() # lock กันเขียนพร้อมก�
 # regex ล้างโค้ดสี ANSI ออกจากข้อความ error (เช่น [0;31m)
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
+# ข้อความพิเศษสำหรับใช้ใน exception เมื่อยกเลิกงาน
+CANCELLED_SENTINEL = "CANCELLED_BY_USER"
+
 
 def clean_ansi(s: str) -> str:
     """ลบโค้ดสี ANSI ออกจากข้อความ"""
@@ -109,8 +112,16 @@ def download_worker():
             job_queue.task_done()
             continue
 
-        # อัปเดตสถานะเป็นกำลังดาวน์โหลด
+        # ถ้างานนี้ถูกยกเลิกก่อนเริ่ม ให้ข้ามไปเลย
         with jobs_lock:
+            if job.get("cancelled"):
+                job["status"] = "cancelled"
+                job["progress"] = "งานนี้ถูกยกเลิกก่อนเริ่มดาวน์โหลด"
+                job_queue.task_done()
+                print(f"[worker] งาน {job_id} ถูกยกเลิกก่อนเริ่ม")
+                continue
+
+            # อัปเดตสถานะเป็นกำลังดาวน์โหลด
             job["status"] = "downloading"
             job["progress"] = "เริ่มดาวน์โหลด..."
 
@@ -157,17 +168,21 @@ def download_worker():
                 }
                 mimetype = "audio/mpeg"
 
-            # hook สำหรับอัปเดต progress
+            # hook สำหรับอัปเดต progress และเช็คยกเลิก
             def progress_hook(d):
-                if d.get("status") == "downloading":
-                    percent = d.get("_percent_str", "").strip()
-                    speed = d.get("_speed_str", "").strip()
-                    eta = d.get("_eta_str", "").strip()
-                    text = f"กำลังดาวน์โหลด... {percent} | ความเร็ว {speed} | เหลือเวลา {eta}"
-                    with jobs_lock:
+                with jobs_lock:
+                    # ถ้าถูกยกเลิกระหว่างดาวน์โหลด ให้โยน exception เพื่อหยุด yt-dlp
+                    if job.get("cancelled"):
+                        job["progress"] = "กำลังยกเลิกงาน..."
+                        raise Exception(CANCELLED_SENTINEL)
+
+                    if d.get("status") == "downloading":
+                        percent = d.get("_percent_str", "").strip()
+                        speed = d.get("_speed_str", "").strip()
+                        eta = d.get("_eta_str", "").strip()
+                        text = f"กำลังดาวน์โหลด... {percent} | ความเร็ว {speed} | เหลือเวลา {eta}"
                         job["progress"] = text
-                elif d.get("status") == "finished":
-                    with jobs_lock:
+                    elif d.get("status") == "finished":
                         job["progress"] = "ดาวน์โหลดเสร็จ กำลังเตรียมไฟล์..."
 
             ydl_opts["progress_hooks"] = [progress_hook]
@@ -195,6 +210,7 @@ def download_worker():
                 job["download_name"] = download_name
                 job["mimetype"] = mimetype
                 job["progress"] = "พร้อมดาวน์โหลดแล้ว"
+                job["title"] = raw_title
 
             print(f"[worker] งานเสร็จ: {job_id} -> {download_name}")
 
@@ -202,25 +218,33 @@ def download_worker():
             msg = clean_ansi(str(e))
             print(f"[worker] ERROR งาน {job_id}: {msg}")
 
-            # แปล error บางแบบให้เข้าใจง่าย
-            if "Sign in to confirm you’re not a bot" in msg or "Sign in to confirm you're not a bot" in msg:
-                human_msg = (
-                    "YouTube ต้องการให้ยืนยันว่าไม่ใช่บอท/ล็อกอินสำหรับคลิปนี้\n"
-                    "- ตรวจสอบว่า cookiefile ถูกต้องและยังไม่หมดอายุ\n"
-                    "- ถ้ายังไม่ได้ทำ ให้ทำไฟล์ youtube_cookies.txt ใหม่ตามขั้นตอนที่ตั้งค่าไว้\n"
-                )
-            elif "cookiefile" in msg and "No such file or directory" in msg:
-                human_msg = (
-                    "ไม่พบไฟล์คุกกี้ที่ตั้งค่าไว้ใน app.py\n"
-                    "ตรวจสอบ path ของ YOUTUBE_COOKIE_FILE ให้ตรงกับไฟล์ youtube_cookies.txt\n"
-                )
-            else:
-                human_msg = f"เกิดข้อผิดพลาด: {msg}"
-
             with jobs_lock:
-                job["status"] = "error"
-                job["error"] = msg
-                job["progress"] = human_msg
+                # เช็คว่ามาจากการยกเลิกเองหรือไม่
+                if CANCELLED_SENTINEL in msg or job.get("cancelled"):
+                    human_msg = "งานนี้ถูกยกเลิกโดยผู้ใช้"
+                    job["status"] = "cancelled"
+                    job["error"] = None
+                    job["progress"] = human_msg
+                    print(f"[worker] งาน {job_id} ถูกยกเลิกโดยผู้ใช้")
+                else:
+                    # แปล error บางแบบให้เข้าใจง่าย
+                    if "Sign in to confirm you’re not a bot" in msg or "Sign in to confirm you're not a bot" in msg:
+                        human_msg = (
+                            "YouTube ต้องการให้ยืนยันว่าไม่ใช่บอท/ล็อกอินสำหรับคลิปนี้\n"
+                            "- ตรวจสอบว่า cookiefile ถูกต้องและยังไม่หมดอายุ\n"
+                            "- ถ้ายังไม่ได้ทำ ให้ทำไฟล์ youtube_cookies.txt ใหม่ตามขั้นตอนที่ตั้งค่าไว้\n"
+                        )
+                    elif "cookiefile" in msg and "No such file or directory" in msg:
+                        human_msg = (
+                            "ไม่พบไฟล์คุกกี้ที่ตั้งค่าไว้ใน app.py\n"
+                            "ตรวจสอบ path ของ YOUTUBE_COOKIE_FILE ให้ตรงกับไฟล์ youtube_cookies.txt\n"
+                        )
+                    else:
+                        human_msg = f"เกิดข้อผิดพลาด: {msg}"
+
+                    job["status"] = "error"
+                    job["error"] = msg
+                    job["progress"] = human_msg
 
         job_queue.task_done()
 
@@ -267,6 +291,8 @@ def enqueue():
         "error": None,
         "unique_id": unique_id,
         "created_at": created_at,
+        "cancelled": False,
+        "title": None,
     }
 
     with jobs_lock:
@@ -300,7 +326,7 @@ def status(job_id):
             return jsonify({"error": "ไม่พบงานนี้ในระบบคิว"}), 404
 
         # คำนวณลำดับคิวปัจจุบัน
-        if job["status"] in ("done", "error"):
+        if job["status"] in ("done", "error", "cancelled"):
             position = 0
         else:
             ahead = [
@@ -316,6 +342,10 @@ def status(job_id):
             "progress": job["progress"],
             "position": position,
             "error": job["error"],
+            "url": job["url"],
+            "format": job["format"],
+            "quality": job["quality"],
+            "title": job.get("title"),
         })
 
 
@@ -345,6 +375,25 @@ def download(job_id):
         download_name=download_name,
         mimetype=mimetype
     )
+
+
+@app.route("/cancel/<job_id>", methods=["POST"])
+def cancel(job_id):
+    """ยกเลิกงานดาวน์โหลดในคิวหรือที่กำลังดาวน์โหลดอยู่"""
+    with jobs_lock:
+        job = jobs.get(job_id)
+
+        if not job:
+            return jsonify({"error": "ไม่พบงานนี้ในระบบคิว"}), 404
+
+        if job["status"] in ("done", "error", "cancelled"):
+            return jsonify({"error": "งานนี้ไม่สามารถยกเลิกได้ (อาจเสร็จหรือถูกยกเลิกไปแล้ว)"}), 400
+
+        job["cancelled"] = True
+        job["progress"] = "กำลังยกเลิกงาน..."
+
+    print(f"[cancel] ผู้ใช้ยกเลิกงาน: {job_id}")
+    return jsonify({"message": "ยกเลิกงานเรียบร้อยแล้ว", "job_id": job_id})
 
 
 if __name__ == "__main__":
