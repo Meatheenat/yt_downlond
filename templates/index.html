@@ -17,14 +17,38 @@
         }
         .container {
             background: white;
-            padding: 30px;
+            padding: 20px 25px;
             border-radius: 10px;
             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
             width: 100%;
-            max-width: 550px;
+            max-width: 900px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
             text-align: center;
         }
-        h1 { color: #333; margin-bottom: 10px; }
+        .layout {
+            display: flex;
+            gap: 16px;
+            align-items: stretch;
+        }
+        .main-panel {
+            flex: 2;
+            border-right: 1px solid #eee;
+            padding-right: 10px;
+        }
+        .queue-panel {
+            flex: 1.3;
+            display: flex;
+            flex-direction: column;
+            max-height: 420px;
+        }
+        .queue-panel h2 {
+            font-size: 16px;
+            margin: 0 0 8px 0;
+            color: #333;
+        }
         input[type=text] {
             width: calc(100% - 22px);
             padding: 10px;
@@ -111,48 +135,143 @@
             background-color: #eeeeee;
             color: #555555;
         }
+
+        /* Queue styles (ด้านขวาแบบคิวเพลง) */
+        .queue-list {
+            border-radius: 6px;
+            border: 1px solid #eee;
+            background-color: #fafafa;
+            padding: 6px;
+            flex: 1;
+            overflow-y: auto;
+            font-size: 13px;
+        }
+        .queue-empty {
+            padding: 8px;
+            color: #888;
+            text-align: center;
+        }
+        .queue-item {
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid transparent;
+            margin-bottom: 5px;
+            text-align: left;
+        }
+        .queue-item.current {
+            border-color: #ff0000;
+            background-color: #ffecec;
+        }
+        .queue-item-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 2px;
+        }
+        .queue-pos {
+            font-weight: bold;
+            color: #555;
+        }
+        .queue-status {
+            font-style: italic;
+            color: #777;
+        }
+        .queue-title {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 2px;
+        }
+        .queue-meta {
+            color: #666;
+            font-size: 12px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                height: 100vh;
+                border-radius: 0;
+                max-width: 100%;
+            }
+            .layout {
+                flex-direction: column;
+            }
+            .main-panel {
+                border-right: none;
+                border-bottom: 1px solid #eee;
+                padding-right: 0;
+                padding-bottom: 10px;
+            }
+            .queue-panel {
+                max-height: 250px;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>ดาวน์โหลด YouTube (คิว)</h1>
-        <input type="text" id="videoUrl" placeholder="วาง URL YouTube ที่นี่...">
 
-        <!-- เลือกความคมชัด -->
-        <select id="quality">
-            <option value="best">Best (อัตโนมัติ)</option>
-            <option value="2160p">4K (2160p)</option>
-            <option value="1440p">2K (1440p)</option>
-            <option value="1080p">1080p (Full HD)</option>
-            <option value="720p" selected>720p (HD)</option>
-            <option value="480p">480p (SD)</option>
-            <option value="360p">360p (ต่ำ)</option>
-        </select>
+        <div class="layout">
+            <!-- ฝั่งซ้าย: ฟอร์ม + สถานะ -->
+            <div class="main-panel">
+                <input type="text" id="videoUrl" placeholder="วาง URL YouTube ที่นี่...">
 
-        <div class="button-group">
-            <button id="btnMp4" onclick="startDownload('mp4')">ดาวน์โหลด MP4 (วิดีโอ)</button>
-            <button id="btnMp3" onclick="startDownload('mp3')">ดาวน์โหลด MP3 (เสียง)</button>
+                <!-- เลือกความคมชัด -->
+                <select id="quality">
+                    <option value="best">Best (อัตโนมัติ)</option>
+                    <option value="2160p">4K (2160p)</option>
+                    <option value="1440p">2K (1440p)</option>
+                    <option value="1080p">1080p (Full HD)</option>
+                    <option value="720p" selected>720p (HD)</option>
+                    <option value="480p">480p (SD)</option>
+                    <option value="360p">360p (ต่ำ)</option>
+                </select>
+
+                <div class="button-group">
+                    <button id="btnMp4" onclick="startDownload('mp4')">ดาวน์โหลด MP4 (วิดีโอ)</button>
+                    <button id="btnMp3" onclick="startDownload('mp3')">ดาวน์โหลด MP3 (เสียง)</button>
+                </div>
+
+                <!-- แสดงข้อมูลว่างานนี้กำลังโหลดอะไรแบบไหนอยู่ -->
+                <div id="jobInfo"></div>
+
+                <!-- แถวแสดงลำดับคิว + ปุ่ม X ยกเลิก -->
+                <div class="queue-row">
+                    <div id="queuePosition">ลำดับคิว: -</div>
+                    <button id="cancelBtn" onclick="cancelCurrent()">✕ ยกเลิกดาวน์โหลด</button>
+                </div>
+
+                <div id="status"></div>
+            </div>
+
+            <!-- ฝั่งขวา: คิวทั้งหมดแบบ playlist -->
+            <div class="queue-panel">
+                <h2>คิวดาวน์โหลดทั้งหมด</h2>
+                <div id="queueList" class="queue-list">
+                    <div class="queue-empty">ไม่มีงานในคิว</div>
+                </div>
+            </div>
         </div>
-
-        <!-- แสดงข้อมูลว่างานนี้กำลังโหลดอะไรแบบไหนอยู่ -->
-        <div id="jobInfo"></div>
-
-        <!-- แถวแสดงลำดับคิว + ปุ่ม X ยกเลิก -->
-        <div class="queue-row">
-            <div id="queuePosition">ลำดับคิว: -</div>
-            <button id="cancelBtn" onclick="cancelCurrent()">✕ ยกเลิกดาวน์โหลด</button>
-        </div>
-
-        <div id="status"></div>
     </div>
 
     <script>
         let currentInterval = null;
         let currentJobId = null;
+        let queueInterval = null;
 
         function setButtonsDisabled(disabled) {
             document.getElementById('btnMp4').disabled = disabled;
             document.getElementById('btnMp3').disabled = disabled;
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         function startDownload(format) {
@@ -229,6 +348,9 @@
                 cancelBtn.style.display = 'inline-block';
                 cancelBtn.disabled = false;
 
+                // อัปเดตคิวด้านขวาทันที
+                refreshQueue();
+
                 // เริ่มเช็คสถานะงานทุก ๆ 3 วินาที
                 currentInterval = setInterval(() => {
                     checkStatus(jobId);
@@ -255,9 +377,11 @@
                         statusDiv.className = 'error';
                         statusDiv.innerText = `เกิดข้อผิดพลาด: ${data.error}`;
                         if (currentInterval) clearInterval(currentInterval);
+                        currentInterval = null;
                         setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
+                        refreshQueue();
                         return;
                     }
 
@@ -305,6 +429,8 @@
                         // ล้างช่อง URL เตรียมสำหรับลิงก์ใหม่
                         document.getElementById('videoUrl').value = '';
 
+                        refreshQueue();
+
                         // ให้เบราว์เซอร์ดาวน์โหลดไฟล์จริงจาก /download/<job_id>
                         window.location.href = `/download/${jobId}`;
                     } else if (status === 'error') {
@@ -315,6 +441,7 @@
                         setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
+                        refreshQueue();
                     } else if (status === 'cancelled') {
                         statusDiv.className = 'cancelled';
                         statusDiv.innerText = progress || 'งานนี้ถูกยกเลิกแล้ว';
@@ -323,6 +450,7 @@
                         setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
+                        refreshQueue();
                     } else {
                         statusDiv.className = 'error';
                         statusDiv.innerText = 'สถานะไม่ทราบแน่ชัด';
@@ -331,6 +459,7 @@
                         setButtonsDisabled(false);
                         queuePositionDiv.style.visibility = 'hidden';
                         cancelBtn.style.display = 'none';
+                        refreshQueue();
                     }
                 })
                 .catch(err => {
@@ -346,6 +475,7 @@
                     setButtonsDisabled(false);
                     queuePositionDiv.style.visibility = 'hidden';
                     cancelBtn.style.display = 'none';
+                    refreshQueue();
                 });
         }
 
@@ -387,6 +517,7 @@
                 queuePositionDiv.style.visibility = 'hidden';
                 cancelBtn.style.display = 'none';
                 currentJobId = null;
+                refreshQueue();
             })
             .catch(err => {
                 console.error(err);
@@ -395,6 +526,62 @@
                 cancelBtn.disabled = false;
             });
         }
+
+        function renderQueue(items) {
+            const queueList = document.getElementById('queueList');
+
+            if (!items || items.length === 0) {
+                queueList.innerHTML = '<div class="queue-empty">ไม่มีงานในคิว</div>';
+                return;
+            }
+
+            let html = '';
+            items.forEach(item => {
+                const isCurrent = (item.job_id === currentJobId);
+                const statusText = item.status === 'downloading'
+                    ? 'กำลังดาวน์โหลด'
+                    : 'รอคิว';
+
+                const title = item.title || '(ยังไม่รู้ชื่อวิดีโอ)';
+                const fmt = (item.format || '').toUpperCase();
+                const quality = item.quality || '';
+
+                html += `
+                    <div class="queue-item ${isCurrent ? 'current' : ''}">
+                        <div class="queue-item-header">
+                            <span class="queue-pos">#${item.position}</span>
+                            <span class="queue-status">[${statusText}]</span>
+                        </div>
+                        <div class="queue-title">${escapeHtml(title)}</div>
+                        <div class="queue-meta">${fmt} | ${quality}</div>
+                    </div>
+                `;
+            });
+
+            queueList.innerHTML = html;
+        }
+
+        function refreshQueue() {
+            fetch('/queue')
+                .then(response => response.json())
+                .then(data => {
+                    renderQueue(data.items || []);
+                })
+                .catch(err => {
+                    console.error('queue error', err);
+                });
+        }
+
+        function startQueuePolling() {
+            if (queueInterval) {
+                clearInterval(queueInterval);
+            }
+            refreshQueue();
+            queueInterval = setInterval(refreshQueue, 5000);
+        }
+
+        // เริ่ม polling คิวเมื่อหน้าโหลด
+        window.addEventListener('load', startQueuePolling);
     </script>
 </body>
 </html>

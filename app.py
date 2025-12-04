@@ -396,5 +396,32 @@ def cancel(job_id):
     return jsonify({"message": "ยกเลิกงานเรียบร้อยแล้ว", "job_id": job_id})
 
 
+@app.route("/queue")
+def queue_view():
+    """ส่งรายการคิวทั้งหมด (แบบคิวเพลง) ให้ฝั่งหน้าเว็บ"""
+    with jobs_lock:
+        # เอาเฉพาะงานที่ยัง active (queued / downloading)
+        active = [
+            j for j in jobs.values()
+            if j["status"] in ("queued", "downloading")
+        ]
+        # เรียงตามเวลาที่เข้ามา
+        active_sorted = sorted(active, key=lambda x: x["created_at"])
+
+        items = []
+        for idx, j in enumerate(active_sorted, start=1):
+            items.append({
+                "job_id": j["id"],
+                "title": j.get("title"),
+                "url": j["url"],
+                "format": j["format"],
+                "quality": j["quality"],
+                "status": j["status"],
+                "position": idx,
+            })
+
+    return jsonify({"items": items})
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
